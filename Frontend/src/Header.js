@@ -1,10 +1,21 @@
+import { useState } from 'react';
 import Container from 'react-bootstrap/Container';
 import Row from 'react-bootstrap/Row';
 import Col from 'react-bootstrap/Col';
-import { Link } from 'react-router-dom';
-import { FaFacebookF, FaInstagram, FaWhatsapp,FaShoppingBag } from 'react-icons/fa';
+import { Link, useNavigate } from 'react-router-dom';
+import { FaFacebookF, FaInstagram, FaWhatsapp, FaShoppingBag, FaSearch } from 'react-icons/fa';
 
 function Header() {
+  const [query, setQuery] = useState('');
+  const navigate = useNavigate();
+
+  const submitSearch = (e) => {
+    e.preventDefault();
+    const q = query.trim();
+    if (!q) return;
+    navigate(`/SHOPALL?q=${encodeURIComponent(q)}`);
+  };
+
   return (
     <Container fluid className="bg-pink-300 h-[50px] flex items-center">
       <Row className="w-full flex items-center justify-between px-4">
@@ -22,24 +33,38 @@ function Header() {
           </p>
         </Col>
 
-        <Col xs={2} className="">  
-        </Col>
-
-        {/* Right Side - Search Bar with Icon */}
-        <Col xs={1} className="flex justify-end relative">
-        <Link
-                className="mx-auto text-decoration-none"
-                to="/CART"
-              >
-                <FaShoppingBag className="text-xl cursor-pointer text-white" />
-              </Link>
-          
+        {/* Right Side - Search bar + Cart icon */}
+        <Col xs={3} className="d-flex justify-content-end align-items-center" style={{ gap: '24px' }}>
+          <form
+            onSubmit={submitSearch}
+            className="d-flex align-items-center bg-white rounded"
+            style={{ height: '28px', paddingLeft: '10px', paddingRight: '8px', minWidth: '160px' }}
+          >
+            <input
+              type="text"
+              placeholder="Search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              className="border-0 bg-transparent flex-grow-1"
+              style={{ outline: 'none', fontSize: '13px', minWidth: 0 }}
+            />
+            <button
+              type="submit"
+              className="border-0 bg-transparent p-0 d-flex align-items-center"
+              aria-label="Search"
+            >
+              <FaSearch className="text-secondary" size={12} />
+            </button>
+          </form>
+          <Link className="text-decoration-none" to="/CART">
+            <FaShoppingBag className="text-xl cursor-pointer text-white" />
+          </Link>
         </Col>
       </Row>
 
     </Container>
 
-    
+
   );
 }
 
