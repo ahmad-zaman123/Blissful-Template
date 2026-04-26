@@ -29,6 +29,7 @@ import Checkout from './Checkout';
 import OrderConfirmation from './OrderConfirmation';
 import Cart from './Cart';
 import { CartProvider } from './context/CartContext';
+import ScrollToTop from './ScrollToTop';
 
 
 function App() {
@@ -36,6 +37,7 @@ function App() {
     <>
 
 <BrowserRouter>
+<ScrollToTop />
 <CartProvider>
 
 <Header />
