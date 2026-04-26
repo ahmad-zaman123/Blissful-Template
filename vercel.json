@@ -13,7 +13,9 @@
   ],
   "routes": [
     { "src": "/api/(.*)", "dest": "/Backend/api/index.js" },
+    { "src": "/static/(.*)", "dest": "/Frontend/static/$1" },
+    { "src": "/(favicon\\.ico|manifest\\.json|robots\\.txt|logo192\\.png|logo512\\.png|asset-manifest\\.json)", "dest": "/Frontend/$1" },
     { "handle": "filesystem" },
-    { "src": "/(.*)", "dest": "/index.html" }
+    { "src": "/(.*)", "dest": "/Frontend/index.html" }
   ]
 }
