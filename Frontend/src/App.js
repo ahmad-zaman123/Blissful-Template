@@ -1,6 +1,7 @@
 import 'bootstrap/dist/css/bootstrap.min.css'; // Bootstrap first
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import './App.css'; // Then custom CSS
+import { Analytics } from '@vercel/analytics/react';
 import HomePage from './HomePage';
 import Header from './Header';
 import Footer from './Footer';
@@ -81,6 +82,7 @@ function App() {
 
     </CartProvider>
     </BrowserRouter>
+    <Analytics />
     {/* <Footer /> */}
 
     </>
