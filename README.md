@@ -23,11 +23,9 @@
   <a href="#-deployment">Deployment</a>
 </p>
 
-<!-- Hero screenshot: add docs/screenshots/home.png (and optionally shop.png, checkout.png), then uncomment:
 <p align="center">
   <img src="docs/screenshots/home.png" alt="Blissful storefront" width="860" />
 </p>
--->
 
 ---
 
