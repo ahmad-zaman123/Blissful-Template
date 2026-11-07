@@ -99,10 +99,10 @@ npm start                   # proxies /api to http://localhost:5000
 | Key | Needed for | Notes |
 |---|---|---|
 | `MONGO_URI` | **everything** | MongoDB connection string. Default `mongodb://127.0.0.1:27017/blissful`. |
-| `CLIENT_ORIGIN` | CORS | Frontend origin, e.g. `http://localhost:3000`. |
+| `CLIENT_ORIGIN` | local dev | Frontend origin allowed to call the API, e.g. `http://localhost:3000`. Leave it unset on Vercel, where the shop and API share one address and no other site may call the API. |
 | `PUBLIC_BASE_URL` | card payments | URL the Safepay form redirects back to after payment. |
 | `SAFEPAY_API_KEY` | card payments | Public key (`sec_…`). |
-| `SAFEPAY_SECRET` | card payments | Secret key: SDK auth and webhook signature. |
+| `SAFEPAY_SECRET` | card payments | Secret key, used to talk to Safepay's API. |
 | `SAFEPAY_ENV` | card payments | `sandbox` or `production`. |
 | `PORT` | no | Defaults to `5000`. |
 
@@ -143,14 +143,16 @@ npm run seed:destroy    # clear products only
         │  card?                         │
         ▼                                ▼
  Safepay hosted form ── webhook ──▶ POST /api/payments/safepay/webhook
-                                     verify HMAC on the raw body
-                                     mark the order paid
+                                     ask Safepay for the payment's real status
+                                     update the order
 ```
 
 - **Cart:** the browser keeps a generated session id in `localStorage` and sends it as the `x-session-id` header, so the cart persists server-side without an account.
 - **COD:** the order is created immediately with payment method `cod`.
-- **Card:** the API creates a Safepay checkout and the browser is redirected to the hosted form. The webhook route reads the **raw** request body so the HMAC signature can be verified before the order is marked paid.
+- **Card:** the API creates a Safepay checkout and the browser is redirected to the hosted form. The webhook only says which payment changed: the server then asks Safepay's API for that payment's status and updates the order from Safepay's answer, never from the webhook body. A forged webhook can't mark an order paid. The confirmation page asks Safepay too, so a missed webhook doesn't leave an order waiting.
 - **Shipping:** a flat fee is added to every order. Amounts are in PKR.
+- **Who sees an order:** each order stores a hash of the session id of the browser that placed it, and only that browser can open its confirmation page. There's no endpoint that lists orders, since they hold customers' names, phones and addresses. Use the database or the Safepay dashboard for that.
+- **Input:** prices always come from the database. Quantities, ids and session ids are checked, MongoDB query operators in a request are treated as plain values, and search text is matched literally.
 
 ## 🔌 API
 
@@ -158,8 +160,17 @@ npm run seed:destroy    # clear products only
 |---|---|
 | **Products** | `GET /api/products`, `GET /api/products/:id` |
 | **Cart** | `GET /api/cart`, `POST /api/cart`, `DELETE /api/cart/:id` |
-| **Orders** | `POST /api/orders`, `GET /api/orders`, `GET /api/orders/:id` |
+| **Orders** | `POST /api/orders`, `GET /api/orders/:id` (only with the placing browser's `x-session-id`) |
 | **Payments** | `GET /api/payments/config`, `POST /api/payments/safepay/checkout`, `POST /api/payments/safepay/webhook` |
+
+## 🧪 Tests
+
+```bash
+cd Backend
+npm test
+```
+
+The tests start their own in-memory MongoDB and use a stand-in for Safepay, so they need no setup or keys. They cover who can read orders, prices and quantities, query-operator injection, the webhook and CORS.
 
 ## 🛠️ Tech stack
 

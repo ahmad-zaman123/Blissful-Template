@@ -4,7 +4,9 @@
     {
       "src": "Frontend/package.json",
       "use": "@vercel/static-build",
-      "config": { "distDir": "build" }
+      "config": {
+        "distDir": "build"
+      }
     },
     {
       "src": "Backend/api/index.js",
@@ -12,10 +14,35 @@
     }
   ],
   "routes": [
-    { "src": "/api/(.*)", "dest": "/Backend/api/index.js" },
-    { "src": "/static/(.*)", "dest": "/Frontend/static/$1" },
-    { "src": "/(favicon\\.ico|manifest\\.json|robots\\.txt|logo192\\.png|logo512\\.png|asset-manifest\\.json)", "dest": "/Frontend/$1" },
-    { "handle": "filesystem" },
-    { "src": "/(.*)", "dest": "/Frontend/index.html" }
+    {
+      "src": "/(.*)",
+      "headers": {
+        "Content-Security-Policy": "default-src 'self'; script-src 'self' https://visitor-tracker-app.vercel.app; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' data: https://cdn.jsdelivr.net; img-src 'self' data: https:; connect-src 'self' https://visitor-tracker-app.vercel.app; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'",
+        "X-Frame-Options": "DENY",
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "strict-origin-when-cross-origin",
+        "Permissions-Policy": "camera=(), microphone=(), geolocation=()"
+      },
+      "continue": true
+    },
+    {
+      "src": "/api/(.*)",
+      "dest": "/Backend/api/index.js"
+    },
+    {
+      "src": "/static/(.*)",
+      "dest": "/Frontend/static/$1"
+    },
+    {
+      "src": "/(favicon\\.ico|manifest\\.json|robots\\.txt|logo192\\.png|logo512\\.png|asset-manifest\\.json)",
+      "dest": "/Frontend/$1"
+    },
+    {
+      "handle": "filesystem"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/Frontend/index.html"
+    }
   ]
 }

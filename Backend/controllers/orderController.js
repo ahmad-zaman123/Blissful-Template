@@ -1,67 +1,31 @@
 const Order = require("../models/Order");
-const Product = require("../models/Product");
 const CartItem = require("../models/CartItem");
 const asyncHandler = require("../utils/asyncHandler");
 const ApiError = require("../utils/ApiError");
-
-const SHIPPING_FEE = 200;
+const { buildOrder, hashSession, isObjectId, sessionIdOf } = require("../utils/checkout");
+const { refreshPaymentStatus } = require("./paymentController");
 
 const createOrder = asyncHandler(async (req, res) => {
-  const { customer, shippingAddress, items, paymentMethod = "cod", sessionId } = req.body;
-
-  if (!customer?.email || !customer?.firstName || !customer?.lastName || !customer?.phone) {
-    throw new ApiError(400, "Customer details are incomplete");
-  }
-  if (!shippingAddress?.address) throw new ApiError(400, "Shipping address is required");
-  if (!Array.isArray(items) || items.length === 0) throw new ApiError(400, "Order must contain at least one item");
-
-  const productIds = items.map((i) => i.productId);
-  const products = await Product.find({ _id: { $in: productIds } });
-  const byId = new Map(products.map((p) => [String(p._id), p]));
-
-  const orderItems = items.map((i) => {
-    const p = byId.get(String(i.productId));
-    if (!p) throw new ApiError(404, `Product not found: ${i.productId}`);
-    const qty = Math.max(1, Number(i.quantity) || 1);
-    return {
-      product: p._id,
-      name: p.name,
-      price: p.price,
-      quantity: qty,
-      image: p.mainImage,
-    };
-  });
-
-  const subtotal = orderItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
-  const shippingFee = SHIPPING_FEE;
-  const total = subtotal + shippingFee;
-
+  const sessionId = sessionIdOf(req.body.sessionId);
   const order = await Order.create({
-    customer,
-    shippingAddress,
-    items: orderItems,
-    paymentMethod,
-    subtotal,
-    shippingFee,
-    total,
+    ...(await buildOrder(req.body)),
+    // Card payments start at /api/payments/safepay/checkout, so an order made here is always cash on delivery.
+    paymentMethod: "cod",
+    sessionHash: hashSession(sessionId),
   });
-
-  if (sessionId) {
-    await CartItem.deleteMany({ sessionId });
-  }
-
+  await CartItem.deleteMany({ sessionId });
   res.status(201).json(order);
 });
 
-const getOrders = asyncHandler(async (req, res) => {
-  const orders = await Order.find().sort({ createdAt: -1 });
-  res.json(orders);
-});
-
+/** Only the browser that placed the order can read it. Anyone else gets the same 404 as a missing order. */
 const getOrderById = asyncHandler(async (req, res) => {
-  const order = await Order.findById(req.params.id);
+  const sessionId = sessionIdOf(req.header("x-session-id"));
+  if (!isObjectId(req.params.id)) throw new ApiError(404, "Order not found");
+  let order = await Order.findOne({ _id: req.params.id, sessionHash: hashSession(sessionId) });
   if (!order) throw new ApiError(404, "Order not found");
+  // Back from Safepay before its webhook arrived: ask Safepay directly.
+  if (order.status === "pending_payment") order = await refreshPaymentStatus(order);
   res.json(order);
 });
 
-module.exports = { createOrder, getOrders, getOrderById };
+module.exports = { createOrder, getOrderById };

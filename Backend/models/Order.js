@@ -30,8 +30,21 @@ const orderSchema = new mongoose.Schema(
     total: { type: Number, required: true },
     status: { type: String, enum: ["pending", "pending_payment", "paid", "shipped", "delivered", "cancelled", "failed", "refunded", "disputed"], default: "pending" },
     safepayTracker: { type: String, index: true },
+    // A SHA-256 of the shopper's session id. Reading an order needs the session id itself.
+    sessionHash: { type: String, index: true },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+    toJSON: {
+      // Never sent to the browser: the tracker identifies the payment, the hash identifies the shopper.
+      transform: (_doc, ret) => {
+        delete ret.safepayTracker;
+        delete ret.sessionHash;
+        delete ret.__v;
+        return ret;
+      },
+    },
+  }
 );
 
 module.exports = mongoose.model("Order", orderSchema);

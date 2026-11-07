@@ -1,10 +1,10 @@
 const express = require("express");
-const { createOrder, getOrders, getOrderById } = require("../controllers/orderController");
+const { createOrder, getOrderById } = require("../controllers/orderController");
 
 const router = express.Router();
 
+// There is deliberately no route that lists orders: they hold customers' names, phones and addresses.
 router.post("/", createOrder);
-router.get("/", getOrders);
 router.get("/:id", getOrderById);
 
 module.exports = router;

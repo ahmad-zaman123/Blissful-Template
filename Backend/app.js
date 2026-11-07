@@ -1,5 +1,6 @@
 require("dotenv").config();
 const express = require("express");
+const mongoose = require("mongoose");
 const cors = require("cors");
 const morgan = require("morgan");
 
@@ -11,13 +12,21 @@ const paymentRoutes = require("./routes/paymentRoutes");
 const { safepayWebhook } = require("./controllers/paymentController");
 const { notFound, errorHandler } = require("./middleware/errorHandler");
 
-const app = express();
+// Any {"$ne": ...} style operator from a request is matched literally instead of run as a query operator.
+mongoose.set("sanitizeFilter", true);
 
-app.use(cors({ origin: process.env.CLIENT_ORIGIN || "*" }));
+const app = express();
+app.disable("x-powered-by");
+// "simple" keeps ?a[b]=c as a plain string, so query parameters can't become objects either.
+app.set("query parser", "simple");
+
+// In production the shop and the API share one address, so no other site may call the API.
+const allowedOrigins = (process.env.CLIENT_ORIGIN || "").split(",").map((o) => o.trim()).filter(Boolean);
+app.use(cors({ origin: allowedOrigins.length ? allowedOrigins : false }));
 
 // Safepay webhook must read the raw body for HMAC verification, so it is
 // mounted before express.json().
-app.post("/api/payments/safepay/webhook", express.raw({ type: "*/*" }), async (req, res, next) => {
+app.post("/api/payments/safepay/webhook", express.raw({ type: "*/*", limit: "64kb" }), async (req, res, next) => {
   try {
     await connectDB();
     return safepayWebhook(req, res, next);
@@ -26,7 +35,7 @@ app.post("/api/payments/safepay/webhook", express.raw({ type: "*/*" }), async (r
   }
 });
 
-app.use(express.json());
+app.use(express.json({ limit: "64kb" }));
 if (process.env.NODE_ENV !== "test" && process.env.NODE_ENV !== "production") {
   app.use(morgan("dev"));
 }

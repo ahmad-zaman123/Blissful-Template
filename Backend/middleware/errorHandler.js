@@ -12,6 +12,12 @@ const errorHandler = (err, req, res, next) => { // eslint-disable-line no-unused
     message = "Invalid id";
   }
 
+  // Unexpected errors can carry database or library details, so only a generic message leaves the server.
+  if (status >= 500 && !err.statusCode) {
+    console.error(err);
+    message = "Server error";
+  }
+
   res.status(status).json({
     message,
     ...(process.env.NODE_ENV === "development" && { stack: err.stack }),
