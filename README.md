@@ -102,7 +102,7 @@ npm start                   # proxies /api to http://localhost:5000
 | `CLIENT_ORIGIN` | local dev | Frontend origin allowed to call the API, e.g. `http://localhost:3000`. Leave it unset on Vercel, where the shop and API share one address and no other site may call the API. |
 | `PUBLIC_BASE_URL` | card payments | URL the Safepay form redirects back to after payment. |
 | `SAFEPAY_API_KEY` | card payments | Public key (`sec_…`). |
-| `SAFEPAY_SECRET` | card payments | Secret key, used to talk to Safepay's API. |
+| `SAFEPAY_SECRET` | card payments | Secret key, used to talk to Safepay's API. The server reads each payment's status from Safepay with it, so without it card orders are never marked paid. |
 | `SAFEPAY_ENV` | card payments | `sandbox` or `production`. |
 | `PORT` | no | Defaults to `5000`. |
 
