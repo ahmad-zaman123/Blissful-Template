@@ -1,11 +1,20 @@
 const Order = require("../models/Order");
-const Product = require("../models/Product");
 const CartItem = require("../models/CartItem");
 const asyncHandler = require("../utils/asyncHandler");
 const ApiError = require("../utils/ApiError");
-const { createTracker, verifyWebhookSignature, isConfigured } = require("../utils/safepay");
+const { buildOrder, hashSession, sessionIdOf } = require("../utils/checkout");
+const { createTracker, fetchTrackerState, isConfigured } = require("../utils/safepay");
 
-const SHIPPING_FEE = 200;
+// What Safepay's own record of a payment means for the order.
+const STATE_TO_STATUS = {
+  TRACKER_ENDED: "paid",
+  TRACKER_OCCURRED: "paid",
+  OCCURRED: "paid",
+  PAID: "paid",
+  DECLINED: "failed",
+  CANCELLED: "cancelled",
+  EXPIRED: "failed",
+};
 
 const getConfig = asyncHandler(async (_req, res) => {
   res.json({ safepay: isConfigured() });
@@ -17,39 +26,14 @@ const getConfig = asyncHandler(async (_req, res) => {
  */
 const createSafepayCheckout = asyncHandler(async (req, res) => {
   if (!isConfigured()) throw new ApiError(503, "Safepay is not configured on the server");
-
-  const { customer, shippingAddress, items, sessionId } = req.body;
-
-  if (!customer?.email || !customer?.firstName || !customer?.lastName || !customer?.phone) {
-    throw new ApiError(400, "Customer details are incomplete");
-  }
-  if (!shippingAddress?.address) throw new ApiError(400, "Shipping address is required");
-  if (!Array.isArray(items) || items.length === 0) throw new ApiError(400, "At least one item is required");
-
-  const productIds = items.map((i) => i.productId);
-  const products = await Product.find({ _id: { $in: productIds } });
-  const byId = new Map(products.map((p) => [String(p._id), p]));
-
-  const orderItems = items.map((i) => {
-    const p = byId.get(String(i.productId));
-    if (!p) throw new ApiError(404, `Product not found: ${i.productId}`);
-    const qty = Math.max(1, Number(i.quantity) || 1);
-    return { product: p._id, name: p.name, price: p.price, quantity: qty, image: p.mainImage };
-  });
-
-  const subtotal = orderItems.reduce((s, i) => s + i.price * i.quantity, 0);
-  const shippingFee = SHIPPING_FEE;
-  const total = subtotal + shippingFee;
+  const sessionId = sessionIdOf(req.body.sessionId);
+  const details = await buildOrder(req.body);
 
   const order = await Order.create({
-    customer,
-    shippingAddress,
-    items: orderItems,
+    ...details,
     paymentMethod: "safepay",
-    subtotal,
-    shippingFee,
-    total,
     status: "pending_payment",
+    sessionHash: hashSession(sessionId),
   });
 
   const baseUrl = process.env.PUBLIC_BASE_URL || "http://localhost:3000";
@@ -58,78 +42,65 @@ const createSafepayCheckout = asyncHandler(async (req, res) => {
   try {
     const { tracker, checkoutUrl } = await createTracker({
       orderId: String(order._id),
-      amountPkr: total,
-      customerEmail: customer.email,
+      amountPkr: details.total,
+      customerEmail: details.customer.email,
       redirectUrl,
     });
     order.safepayTracker = tracker;
     await order.save();
-
-    if (sessionId) await CartItem.deleteMany({ sessionId });
-
+    await CartItem.deleteMany({ sessionId });
     res.status(201).json({ orderId: order._id, checkoutUrl });
   } catch (err) {
+    console.error("[safepay] checkout failed:", err.message);
     order.status = "failed";
     await order.save();
-    throw new ApiError(502, `Failed to start Safepay checkout: ${err.message}`);
+    throw new ApiError(502, "Couldn't start the card payment. Please try again or choose cash on delivery.");
   }
 });
 
 /**
- * Webhook endpoint Safepay calls when payment state changes.
- * Mounted with `express.raw()` so we can verify the signature against the
- * raw request bytes. After verification we parse the JSON and update the
- * matching order's status.
+ * Sets a waiting order's status from Safepay's own record of the payment. The status is never taken from a
+ * request, so a forged webhook or a crafted page visit can't mark an order paid.
+ */
+const refreshPaymentStatus = async (order) => {
+  if (order.status !== "pending_payment" || !order.safepayTracker || !isConfigured()) return order;
+  let state;
+  try {
+    state = await fetchTrackerState(order.safepayTracker);
+  } catch (err) {
+    console.error("[safepay] status check failed:", err.message);
+    return order;
+  }
+  const next = STATE_TO_STATUS[state];
+  if (!next) return order;
+  // Only a still-waiting order changes, so two checks at once can't overwrite a later status.
+  const updated = await Order.findOneAndUpdate(
+    { _id: order._id, status: "pending_payment" },
+    { $set: { status: next } },
+    { new: true }
+  );
+  return updated || (await Order.findById(order._id));
+};
+
+/**
+ * Safepay calls this when a payment changes. The body only says which payment to look at: Misconfigured or
+ * forged calls can at most make the server ask Safepay about a payment it already knows.
  */
 const safepayWebhook = asyncHandler(async (req, res) => {
-  const rawBody = req.body instanceof Buffer ? req.body.toString("utf8") : JSON.stringify(req.body);
-  const signature = req.headers["x-sfpy-signature"];
-
-  console.log("[safepay webhook] headers:", JSON.stringify(req.headers, null, 2));
-  console.log("[safepay webhook] body:", rawBody);
-
-  // Until we've confirmed Safepay's exact signature scheme, log a verification
-  // attempt but don't reject — flip back to enforcement once verified.
-  const sigOk = verifyWebhookSignature(rawBody, signature);
-  console.log("[safepay webhook] signature header:", signature, "verify:", sigOk);
-
   let payload;
   try {
-    payload = JSON.parse(rawBody);
+    payload = JSON.parse(req.body instanceof Buffer ? req.body.toString("utf8") : "");
   } catch {
     return res.status(400).json({ message: "Invalid JSON" });
   }
-
-  const eventType = payload?.type || payload?.event;
-  const tracker = payload?.data?.tracker || payload?.tracker;
-  const state = payload?.data?.state || payload?.state;
-
-  if (!tracker) return res.status(400).json({ message: "Missing tracker" });
-
+  const tracker = payload?.data?.tracker ?? payload?.tracker;
+  if (typeof tracker !== "string" || !/^[A-Za-z0-9_-]{1,200}$/.test(tracker)) {
+    return res.status(400).json({ message: "Missing tracker" });
+  }
   const order = await Order.findOne({ safepayTracker: tracker });
   if (!order) return res.status(404).json({ message: "Order not found" });
-
-  const eventMap = {
-    "payment.succeeded": "paid",
-    "payment.failed": "failed",
-    "payment.refunded": "refunded",
-    "payment.disputed": "disputed",
-  };
-  const stateMap = {
-    TRACKER_ENDED: "paid",
-    TRACKER_OCCURRED: "paid",
-    OCCURRED: "paid",
-    PAID: "paid",
-    DECLINED: "failed",
-    CANCELLED: "cancelled",
-    EXPIRED: "failed",
-  };
-  const next = eventMap[eventType] || stateMap[state] || order.status;
-  if (next !== order.status) {
-    order.status = next;
-    await order.save();
-  }
+  await refreshPaymentStatus(order);
   res.json({ ok: true });
 });
 
-module.exports = { getConfig, createSafepayCheckout, safepayWebhook };
+module.exports = { getConfig, createSafepayCheckout, safepayWebhook, refreshPaymentStatus, STATE_TO_STATUS };

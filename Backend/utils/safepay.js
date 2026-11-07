@@ -1,4 +1,3 @@
-const crypto = require("crypto");
 const Safepay = require("@sfpy/node-core");
 
 const getEnv = () => (process.env.SAFEPAY_ENV === "production" ? "production" : "sandbox");
@@ -39,7 +38,6 @@ const createTracker = async ({ orderId, amountPkr, customerEmail, redirectUrl })
     currency: "PKR",
     amount: Math.round(amountPkr * 100),
   });
-  console.log("[safepay] session response:", JSON.stringify(sessionRes, null, 2));
 
   const trackerToken =
     sessionRes?.tracker?.token ||
@@ -50,7 +48,6 @@ const createTracker = async ({ orderId, amountPkr, customerEmail, redirectUrl })
   // 2. Mint a client passport token (tbt) so the embedded form can call back
   // to the API on behalf of this session.
   const passportRes = await safepay.client.passport.create({});
-  console.log("[safepay] passport response:", JSON.stringify(passportRes, null, 2));
 
   // Passport endpoint returns the token directly at .data (a raw string).
   const tbt =
@@ -75,22 +72,14 @@ const createTracker = async ({ orderId, amountPkr, customerEmail, redirectUrl })
 };
 
 /**
- * Verify a webhook payload using HMAC-SHA256 with the merchant secret.
- * TODO(safepay-docs): confirm the exact header name and signing scheme
- * against Safepay's webhook documentation.
+ * Safepay's own record of a payment, such as "TRACKER_ENDED" once it is paid. This is what order statuses are
+ * set from, rather than anything in a webhook or request body.
  */
-const verifyWebhookSignature = (rawBody, signatureHeader) => {
-  if (!process.env.SAFEPAY_SECRET) return false;
-  if (!signatureHeader) return false;
-  const computed = crypto
-    .createHmac("sha256", process.env.SAFEPAY_SECRET)
-    .update(rawBody)
-    .digest("hex");
-  try {
-    return crypto.timingSafeEqual(Buffer.from(computed), Buffer.from(signatureHeader));
-  } catch {
-    return false;
-  }
+const fetchTrackerState = async (tracker) => {
+  const res = await getSdk().reporter.payments.fetch(tracker);
+  const data = res?.data ?? res;
+  const state = data?.tracker?.state ?? data?.state ?? data?.data?.tracker?.state;
+  return typeof state === "string" ? state : null;
 };
 
-module.exports = { createTracker, verifyWebhookSignature, isConfigured, getEnv };
+module.exports = { createTracker, fetchTrackerState, isConfigured, getEnv };

@@ -2,27 +2,28 @@ const CartItem = require("../models/CartItem");
 const Product = require("../models/Product");
 const asyncHandler = require("../utils/asyncHandler");
 const ApiError = require("../utils/ApiError");
+const { isObjectId, quantityOf, sessionIdOf, MAX_QUANTITY } = require("../utils/checkout");
 
-const getSessionId = (req) => {
-  const sid = req.header("x-session-id") || req.query.sessionId;
-  if (!sid) throw new ApiError(400, "Missing x-session-id header");
-  return sid;
-};
+const sessionOf = (req) => sessionIdOf(req.header("x-session-id"));
 
 const getCart = asyncHandler(async (req, res) => {
-  const sessionId = getSessionId(req);
-  const items = await CartItem.find({ sessionId }).populate("product");
+  const items = await CartItem.find({ sessionId: sessionOf(req) }).populate("product");
   res.json(items);
 });
 
 const addToCart = asyncHandler(async (req, res) => {
-  const sessionId = getSessionId(req);
-  const { productId, quantity = 1 } = req.body;
-  if (!productId) throw new ApiError(400, "productId is required");
+  const sessionId = sessionOf(req);
+  const { productId } = req.body;
+  if (!isObjectId(productId)) throw new ApiError(400, "productId is required");
+  const quantity = quantityOf(req.body.quantity);
 
   const product = await Product.findById(productId);
   if (!product) throw new ApiError(404, "Product not found");
 
+  const existing = await CartItem.findOne({ sessionId, product: productId });
+  if (existing && existing.quantity + quantity > MAX_QUANTITY) {
+    throw new ApiError(400, `You can add up to ${MAX_QUANTITY} of one product`);
+  }
   const item = await CartItem.findOneAndUpdate(
     { sessionId, product: productId },
     { $inc: { quantity }, $setOnInsert: { sessionId, product: productId } },
@@ -33,7 +34,8 @@ const addToCart = asyncHandler(async (req, res) => {
 });
 
 const removeFromCart = asyncHandler(async (req, res) => {
-  const sessionId = getSessionId(req);
+  const sessionId = sessionOf(req);
+  if (!isObjectId(req.params.id)) throw new ApiError(404, "Cart item not found");
   const removed = await CartItem.findOneAndDelete({ sessionId, _id: req.params.id });
   if (!removed) throw new ApiError(404, "Cart item not found");
   res.json({ message: "Removed", id: req.params.id });
